@@ -3,8 +3,6 @@ pyautogui
 pydirectinput
 pynput
 mss
-pytesseract
 pillow
 keyboard
 numpy
-scipy
