@@ -1,0 +1,67 @@
+name: Build and release the exe
+
+# Push a tag to publish:
+#   git tag v1.1.0 && git push origin v1.1.0
+#
+# Windows runner because PyInstaller cannot cross-compile - a Windows exe
+# has to be built on Windows. The tag has to match version.py, since that
+# is the number every installed copy compares itself against; a mismatch
+# would leave people either never offered the update or offered it forever.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create the release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Check the tag matches version.py
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(python -c "from version import VERSION; print(VERSION)")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version.py ($version)"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run the tests
+        run: |
+          python test_ocr.py
+          python test_macro.py
+
+      - name: Build
+        run: python build.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DonutAHMacro
+          path: dist/DonutAHMacro.exe
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/DonutAHMacro.exe \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
