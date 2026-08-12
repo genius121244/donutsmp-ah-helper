@@ -55,6 +55,9 @@ jobs:
       # alongside it is what makes swapping resource packs possible: the
       # folder next to the exe wins over the bundled one, so the file is
       # there to be replaced rather than having to be created.
+      # Font+.zip is the same pack in the form Minecraft's resourcepacks
+      # folder takes, so it can be dropped in on a new PC/account without
+      # running the program at all (Settings does it for you otherwise).
       - name: Package
         shell: pwsh
         run: |
@@ -62,6 +65,7 @@ jobs:
           Copy-Item dist/DonutAHMacro.exe package/
           Copy-Item 'Font+' package/ -Recurse
           Copy-Item READ_THIS_FIRST.md package/
+          Compress-Archive -Path 'Font+/*' -DestinationPath 'package/Font+.zip' -Force
           Compress-Archive -Path package/* -DestinationPath DonutAHMacro.zip -Force
 
       - uses: actions/upload-artifact@v4

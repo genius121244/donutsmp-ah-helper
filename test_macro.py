@@ -24,6 +24,7 @@ from PIL import Image
 
 import config
 import detect
+import fontpack
 import keybinds
 import pricing
 import slots
@@ -527,6 +528,62 @@ class ConfigSharingTests(unittest.TestCase):
                 self.assertTrue(os.path.abspath(path).startswith(
                     os.path.abspath(receiver_dir)))
             self.assertFalse(os.path.exists(os.path.join(folder, "..", "evil.png")))
+
+
+class FontPackTests(unittest.TestCase):
+    """Installing the resource pack into Minecraft."""
+
+    def test_installing_copies_the_whole_pack(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = os.path.join(folder, "Font+", "assets", "minecraft",
+                                  "textures", "font")
+            os.makedirs(source)
+            Image.new("RGBA", (128, 128)).save(os.path.join(source, "ascii.png"))
+            destination = os.path.join(folder, "resourcepacks")
+
+            with mock.patch("fontpack.find_pack",
+                            return_value=os.path.join(folder, "Font+")):
+                target = fontpack.install(destination)
+
+            self.assertTrue(os.path.exists(os.path.join(
+                target, "assets", "minecraft", "textures", "font", "ascii.png")))
+            self.assertTrue(fontpack.is_installed(destination))
+
+    def test_reinstalling_replaces_the_old_copy(self):
+        # Minecraft would otherwise keep showing whatever was there before.
+        with tempfile.TemporaryDirectory() as folder:
+            source = os.path.join(folder, "Font+")
+            os.makedirs(source)
+            open(os.path.join(source, "pack.mcmeta"), "w").close()
+            destination = os.path.join(folder, "resourcepacks")
+            stale = os.path.join(destination, "Font+")
+            os.makedirs(stale)
+            open(os.path.join(stale, "old-file.png"), "w").close()
+
+            with mock.patch("fontpack.find_pack", return_value=source):
+                target = fontpack.install(destination)
+
+            self.assertFalse(os.path.exists(os.path.join(target, "old-file.png")))
+            self.assertTrue(os.path.exists(os.path.join(target, "pack.mcmeta")))
+
+    def test_a_missing_pack_is_an_error_not_an_empty_install(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch("fontpack.find_pack", return_value=None):
+                with self.assertRaises(FileNotFoundError):
+                    fontpack.install(os.path.join(folder, "resourcepacks"))
+
+    def test_it_refuses_when_minecraft_was_never_run(self):
+        # Creating .minecraft ourselves would report success while putting
+        # the pack somewhere the game never looks.
+        with tempfile.TemporaryDirectory() as folder:
+            missing = os.path.join(folder, "nope", ".minecraft")
+            with mock.patch("fontpack.find_pack", return_value=folder), \
+                 mock.patch("fontpack.minecraft_dir", return_value=missing), \
+                 mock.patch("fontpack.resourcepacks_dir",
+                            return_value=os.path.join(missing, "resourcepacks")):
+                with self.assertRaises(FileNotFoundError):
+                    fontpack.install()
+            self.assertFalse(os.path.exists(missing))
 
 
 class WebhookTests(unittest.TestCase):
