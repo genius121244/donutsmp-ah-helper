@@ -1,13 +1,14 @@
 """
 main.py
-Entry point. Run this file to launch the macro GUI.
+Launches the application. Run this file.
 """
 
-BUILD_VERSION = "2026-08-10-r6-debug-prints"
+from ui.app import App
 
-from gui import App
+
+def main():
+    App().mainloop()
+
 
 if __name__ == "__main__":
-    print(f"=== DonutSMP AH Macro | build: {BUILD_VERSION} ===")
-    app = App()
-    app.mainloop()
+    main()

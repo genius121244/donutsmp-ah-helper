@@ -31,11 +31,10 @@ import re
 import tempfile
 import time
 
-import mss
 import numpy as np
-from PIL import Image
 
 import mcfont
+import screen
 
 # Pixels at least this bright (in every channel) count as text. Minecraft's
 # drop shadow is drawn at 25% brightness, so any cutoff well above that
@@ -69,12 +68,7 @@ def _tables():
 def screenshot_region(region, pad=2):
     """region = (x1, y1, x2, y2). Pads a couple px on every side so a tight
     manual crop doesn't clip characters. Returns a PIL Image."""
-    x1, y1, x2, y2 = region
-    x1, y1, x2, y2 = x1 - pad, y1 - pad, x2 + pad, y2 + pad
-    with mss.mss() as sct:
-        monitor = {"left": x1, "top": y1, "width": x2 - x1, "height": y2 - y1}
-        shot = sct.grab(monitor)
-        return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    return screen.grab(region, pad=pad)
 
 
 # --- Reading -----------------------------------------------------------
@@ -276,6 +270,49 @@ def parse_price(text):
     # Several prices in one tooltip means the region covers more than the
     # price line; the listing we care about is the cheapest.
     return min(prices)
+
+
+# Balances are written in full ('$12,345,678'), not shorthand, so they need
+# their own pattern - parse_price deliberately refuses a bare number, since
+# a price missing its k would be a 1000x mistake.
+_MONEY_RE = re.compile(r"(?<![\d.])\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*([kmb])?")
+
+MAX_SANE_MONEY = 1_000_000_000_000
+
+
+def parse_money(text):
+    """Reads a balance off already-read text. Returns an int, or None.
+
+    Takes the largest number on the line rather than the smallest: the
+    money box can catch a nearby '+1.2k' change indicator, and the balance
+    is the bigger of the two.
+    """
+    values = []
+    for line in text.splitlines():
+        line = line.lower()
+        for match in _MONEY_RE.finditer(line):
+            before = line[match.start() - 1] if match.start() else ""
+            after = line[match.end()] if match.end() < len(line) else ""
+            if "?" in (before, after):
+                continue
+            number, suffix = match.groups()
+            try:
+                value = float(number.replace(",", "")) * _SUFFIX.get(suffix or "", 1)
+            except ValueError:
+                continue
+            if 0 < value <= MAX_SANE_MONEY:
+                values.append(int(value))
+    return max(values) if values else None
+
+
+def get_money(region):
+    """Full pipeline for the balance box. Returns int or None."""
+    image = screenshot_region(region)
+    text = read_region_text(image)
+    money = parse_money(text)
+    if money is None:
+        _save_debug_snapshot(image, "nomoney")
+    return money
 
 
 def format_price(value):
