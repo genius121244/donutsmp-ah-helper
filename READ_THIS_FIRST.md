@@ -1,9 +1,18 @@
 # DonutSMP AH macro
 
+Run the `.exe` from the [releases
+page](https://github.com/genius121244/donutsmp-ah-helper/releases), or from
+source:
+
 ```
 pip install -r requirements.txt
 python main.py
 ```
+
+The exe checks for a newer release on launch and offers to update itself
+(**Settings → Updates** to check by hand or switch that off). Your settings
+live outside the program, so an update never touches your coordinates.
+Build one yourself with `python build.py` on Windows.
 
 Keep the `Font+` folder next to the macro — that's where the price reader
 gets your font from. If you switch resource packs, drop the new pack's
@@ -13,13 +22,17 @@ gets your font from. If you switch resource packs, drop the new pack's
 
 Everything is in the **Pixel / OCR** tab, and nothing needs the mouse:
 
-1. Open the game to the screen you're configuring, press **Capture in 5s**
-   and alt-tab back into Minecraft.
+1. Open the game to the screen you're configuring and press **F7** (or
+   whatever you bind *Capture Screen* to in the Keybinds tab). It grabs the
+   screen while Minecraft is still in front and brings the editor up with
+   the shot loaded. **Capture in 5s** does the same via a countdown if you
+   would rather alt-tab.
 2. Pick what you're setting from the list on the left.
 3. Arrow keys move it, **Shift + Arrows** resize (boxes only), **Ctrl +
    Arrows** move ten pixels at a time. **Enter** saves, **Esc** resets.
-4. Use **Test this selection** to confirm the box reads what you expect
-   before trusting it.
+4. The panel on the right shows the whole inside of the box, blown up as
+   far as it fits, so you can see whether an edge is clipping a digit.
+   **Test this selection** then reads it for real.
 
 What you need to set before the macro will start:
 
@@ -107,3 +120,4 @@ Consequences worth knowing:
 - `config.py` — settings, stored in `%APPDATA%\DonutAHMacro` so updating
   the macro never wipes your coordinates.
 - `webhook.py`, `applog.py`, `stats.py`, `keybinds.py`.
+- `updater.py` / `build.py` / `version.py` — the exe build and self-update.

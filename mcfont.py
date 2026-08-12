@@ -20,6 +20,7 @@ whichever one the on-screen text actually matches.
 """
 
 import os
+import sys
 
 import numpy as np
 from PIL import Image
@@ -52,13 +53,30 @@ def _rank(ch):
     return 2
 
 
+def _base_dirs():
+    """Where to look for the pack, nearest first.
+
+    In a PyInstaller build the bundled copy unpacks to a temp folder, but
+    the folder holding the .exe is checked first so dropping a different
+    resource pack next to the program overrides the built-in one without
+    needing a new build.
+    """
+    dirs = []
+    if getattr(sys, "frozen", False):
+        dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+        dirs.append(getattr(sys, "_MEIPASS", ""))
+    dirs.append(os.path.dirname(os.path.abspath(__file__)))
+    return [d for d in dirs if d]
+
+
 def find_atlas(base_dir=None):
     """Absolute path of the font atlas, or None if no atlas is bundled."""
-    base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
-    for rel in FONT_SEARCH_PATHS:
-        path = os.path.join(base_dir, rel)
-        if os.path.exists(path):
-            return path
+    bases = [base_dir] if base_dir else _base_dirs()
+    for base in bases:
+        for rel in FONT_SEARCH_PATHS:
+            path = os.path.join(base, rel)
+            if os.path.exists(path):
+                return path
     return None
 
 

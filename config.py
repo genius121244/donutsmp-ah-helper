@@ -115,6 +115,10 @@ KEYBIND_DEFINITIONS = [
     {"key": "toggle", "label": "Start / Stop", "default": "f8"},
     {"key": "pause", "label": "Pause / Resume", "default": "f9"},
     {"key": "emergency_stop", "label": "Emergency Stop", "default": "f10"},
+    # Pressed from inside Minecraft, so the capture happens without having
+    # to alt-tab out first - alt-tabbing is what changes the screen you
+    # were trying to photograph.
+    {"key": "capture", "label": "Capture Screen (Pixel/OCR)", "default": "f7"},
 ]
 
 WEBHOOK_EVENTS = [
@@ -207,6 +211,7 @@ DEFAULT_SETTINGS = {
         "stop_on_unexpected_state": True,
         "start_minimized": False,
         "keep_cycling": True,
+        "check_updates_on_start": True,
     },
 }
 

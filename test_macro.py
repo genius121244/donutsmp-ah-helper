@@ -25,6 +25,7 @@ import detect
 import keybinds
 import pricing
 import slots
+import updater
 import webhook
 from stats import SessionStats
 
@@ -358,6 +359,28 @@ class WebhookTests(unittest.TestCase):
         fields = dict(session.summary_fields())
         self.assertEqual(fields["Items sold"], 9)
         self.assertEqual(fields["Revenue"], "$250,000")
+
+
+class UpdaterTests(unittest.TestCase):
+    """Version comparison only - the download and the exe swap need a real
+    release and a real Windows process to mean anything."""
+
+    def test_versions_compare_numerically_not_as_text(self):
+        self.assertTrue(updater.is_newer("1.10.0", "1.9.0"))
+        self.assertTrue(updater.is_newer("v2.0.0", "1.9.9"))
+        self.assertFalse(updater.is_newer("1.0.0", "1.0.0"))
+        self.assertFalse(updater.is_newer("0.9.0", "1.0.0"))
+
+    def test_tag_prefixes_and_short_tags_are_tolerated(self):
+        self.assertEqual(updater.parse_version("v1.2.3"), (1, 2, 3))
+        self.assertEqual(updater.parse_version("1.2"), (1, 2, 0))
+        self.assertEqual(updater.parse_version("release-3"), (3, 0, 0))
+
+    def test_an_unreadable_tag_never_looks_like_an_update(self):
+        # A release named something odd must not trigger an update prompt.
+        self.assertFalse(updater.is_newer("", "1.0.0"))
+        self.assertFalse(updater.is_newer(None, "1.0.0"))
+        self.assertFalse(updater.is_newer("latest", "1.0.0"))
 
 
 if __name__ == "__main__":

@@ -9,13 +9,16 @@ buried here.
 
 import os
 import shutil
+import threading
 import time
 
 import customtkinter as ctk
 
 import config
+import updater
 from applog import log
 from ui import theme
+from version import VERSION
 
 TIMING_LABELS = {
     "command": "Typing a command",
@@ -92,6 +95,28 @@ class SettingsTab:
             anchor="w", padx=16, pady=(0, 4))
         for key, label in TIMING_LABELS.items():
             self._range(timings, key, label)
+
+        # -- updates ---------------------------------------------------------
+        updates = theme.card(scroll)
+        updates.pack(fill="x", pady=(0, 12))
+        theme.heading(updates, "Updates", 15).pack(anchor="w", padx=16, pady=(14, 2))
+        theme.caption(updates,
+                      f"You are on version {VERSION}. New builds are picked up "
+                      f"from the GitHub releases page; your settings live "
+                      f"outside the program, so updating never touches "
+                      f"them.").pack(anchor="w", padx=16)
+
+        update_row = ctk.CTkFrame(updates, fg_color="transparent")
+        update_row.pack(fill="x", padx=16, pady=10)
+        self.update_button = theme.subtle_button(
+            update_row, "Check for updates", self.check_updates, width=150)
+        self.update_button.pack(side="left", padx=(0, 8))
+        self.update_status = theme.caption(update_row, "")
+        self.update_status.pack(side="left")
+
+        self._switch(updates, ("general", "check_updates_on_start"),
+                     "Check for updates when the app starts")
+        ctk.CTkLabel(updates, text="").pack(pady=2)
 
         # -- config ----------------------------------------------------------
         files = theme.card(scroll)
@@ -189,6 +214,28 @@ class SettingsTab:
             os.startfile(folder)  # Windows only; the macro's actual platform
         except AttributeError:
             self.status.configure(text=folder)
+
+    # -- updates ---------------------------------------------------------
+
+    def check_updates(self):
+        self.update_button.configure(state="disabled")
+        self.update_status.configure(text="Checking...")
+
+        def done(update):
+            self.parent.after(0, self._show_update, update)
+
+        def run():
+            done(updater.check())
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_update(self, update):
+        self.update_button.configure(state="normal")
+        if update is None:
+            self.update_status.configure(text=f"{VERSION} is the latest version.")
+            return
+        self.update_status.configure(text=f"Version {update.version} available.")
+        self.app.offer_update(update)
 
     def reset_timings(self):
         self.app.settings["timing"] = dict(config.DEFAULT_TIMING)
