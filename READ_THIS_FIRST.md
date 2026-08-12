@@ -1,8 +1,8 @@
 # DonutSMP AH macro
 
-Run the `.exe` from the [releases
-page](https://github.com/genius121244/donutsmp-ah-helper/releases), or from
-source:
+Download `DonutAHMacro.zip` from the [releases
+page](https://github.com/genius121244/donutsmp-ah-helper/releases), unzip it
+and run `DonutAHMacro.exe`. Or from source:
 
 ```
 pip install -r requirements.txt

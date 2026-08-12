@@ -51,10 +51,23 @@ jobs:
       - name: Build
         run: python build.py
 
+      # The exe already carries a copy of the pack, but shipping Font+
+      # alongside it is what makes swapping resource packs possible: the
+      # folder next to the exe wins over the bundled one, so the file is
+      # there to be replaced rather than having to be created.
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item dist/DonutAHMacro.exe package/
+          Copy-Item 'Font+' package/ -Recurse
+          Copy-Item READ_THIS_FIRST.md package/
+          Compress-Archive -Path package/* -DestinationPath DonutAHMacro.zip -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: DonutAHMacro
-          path: dist/DonutAHMacro.exe
+          path: DonutAHMacro.zip
 
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
@@ -62,6 +75,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/DonutAHMacro.exe \
+          gh release create "$GITHUB_REF_NAME" \
+            DonutAHMacro.zip dist/DonutAHMacro.exe \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+      # The zip is for people; the updater downloads the bare exe, since it
+      # swaps a single file in place and has nothing to unzip into.
