@@ -24,6 +24,7 @@ from PIL import Image, ImageTk
 
 import config
 import detect
+import keybinds
 import ocr
 import screen
 import slots
@@ -33,6 +34,8 @@ from ui import theme
 MOVE_STEP = 1
 FAST_STEP = 10
 MIN_BOX = 4
+
+PREVIEW_W, PREVIEW_H = 224, 150
 
 POINT = "point"
 REGION = "region"
@@ -94,7 +97,8 @@ class PixelOCRTab:
                              width=130).pack(side="left", padx=(0, 6))
         theme.subtle_button(row, "Capture in 5s", lambda: self.capture_later(5),
                             width=120).pack(side="left", padx=(0, 12))
-        theme.caption(row, "Alt-tab into Minecraft during the countdown.").pack(side="left")
+        self.capture_hint = theme.caption(row, "")
+        self.capture_hint.pack(side="left")
 
         self.coord_label = ctk.CTkLabel(row, text="X - / Y -",
                                         font=theme.font(13, "bold"))
@@ -136,10 +140,12 @@ class PixelOCRTab:
                                        text_color=theme.TEXT_MUTED, anchor="w")
         self.size_label.pack(fill="x", padx=12, pady=(8, 0))
 
-        self.magnifier = tk.Canvas(editor, width=200, height=120, bg="#141518",
-                                   highlightthickness=1,
+        self.magnifier = tk.Canvas(editor, width=PREVIEW_W, height=PREVIEW_H,
+                                   bg="#141518", highlightthickness=1,
                                    highlightbackground=theme.BORDER)
-        self.magnifier.pack(padx=12, pady=10)
+        self.magnifier.pack(padx=12, pady=(8, 2))
+        self.preview_caption = theme.caption(editor, "")
+        self.preview_caption.pack(anchor="w", padx=12, pady=(0, 6))
 
         keys = ctk.CTkFrame(editor, fg_color="transparent")
         keys.pack(fill="x", padx=12, pady=(0, 8))
@@ -254,6 +260,16 @@ class PixelOCRTab:
 
     # -- screenshot ------------------------------------------------------
 
+    def _capture_hint_text(self):
+        """Tell the user the hotkey they actually have bound, not a fixed
+        default they may have changed."""
+        binding = (self.app.settings.get("keybinds") or {}).get("capture")
+        if binding:
+            return (f"Press {keybinds.describe(binding)} while Minecraft "
+                    f"is in front to capture without alt-tabbing.")
+        return ("Bind a capture key in the Keybinds tab, or use 'Capture in 5s' "
+                "and alt-tab into Minecraft.")
+
     def capture_now(self):
         try:
             self.shot = screen.grab_screen()
@@ -282,9 +298,13 @@ class PixelOCRTab:
 
         if self.shot is None:
             self.canvas.create_text(
-                width // 2, height // 2, fill=theme.TEXT_MUTED,
-                font=("TkDefaultFont", 13),
-                text="Press 'Capture screen' to grab the game window")
+                width // 2, height // 2 - 14, fill=theme.TEXT,
+                font=("TkDefaultFont", 14, "bold"), text="No screenshot yet")
+            self.canvas.create_text(
+                width // 2, height // 2 + 16, fill=theme.TEXT_MUTED,
+                font=("TkDefaultFont", 11), justify="center",
+                text=self._capture_hint_text() + "\n"
+                     "Then pick something on the left and move it with the arrows.")
             return
 
         self.scale = min(width / self.shot.width, height / self.shot.height, 1.0)
@@ -309,19 +329,55 @@ class PixelOCRTab:
 
     def _draw_overlay(self):
         if len(self.value) == 2:
-            x, y = self._to_canvas(*self.value)
-            # A crosshair, not a box: a click target is one pixel, and a
-            # box around it would hide which pixel that is.
-            self.canvas.create_line(x - 18, y, x + 18, y, fill=theme.ACCENT, width=1)
-            self.canvas.create_line(x, y - 18, x, y + 18, fill=theme.ACCENT, width=1)
-            self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline=theme.ACCENT)
+            self._draw_crosshair()
         else:
-            x1, y1 = self._to_canvas(self.value[0], self.value[1])
-            x2, y2 = self._to_canvas(self.value[2], self.value[3])
-            self.canvas.create_rectangle(x1, y1, x2, y2, outline=theme.ACCENT, width=2)
-            for cx, cy in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
-                self.canvas.create_rectangle(cx - 3, cy - 3, cx + 3, cy + 3,
-                                             outline=theme.ACCENT, fill=theme.ACCENT)
+            self._draw_box()
+
+    def _draw_crosshair(self):
+        """Two hairlines spanning the whole preview, meeting at the target.
+
+        Full-width lines rather than a marker around the point: the lines
+        are what let you line the target up with something across the
+        screen, and a shape drawn around a single pixel covers the pixel
+        you are aiming at.
+        """
+        x, y = self._to_canvas(*self.value)
+        left, top = self.offset
+        right = left + self.shot.width * self.scale
+        bottom = top + self.shot.height * self.scale
+        gap = 5  # keep the exact pixel clear of ink
+
+        for coords in (((left, y), (x - gap, y)), ((x + gap, y), (right, y)),
+                       ((x, top), (x, y - gap)), ((x, y + gap), (x, bottom))):
+            (ax, ay), (bx, by) = coords
+            # Dark line underneath so the hairline stays visible over both
+            # the bright GUI and the dark inventory background.
+            self.canvas.create_line(ax, ay, bx, by, fill="#101114", width=3)
+            self.canvas.create_line(ax, ay, bx, by, fill=theme.ACCENT, width=1)
+
+        self.canvas.create_rectangle(x - 1, y - 1, x + 1, y + 1,
+                                     outline=theme.ACCENT)
+
+    def _draw_box(self):
+        x1, y1 = self._to_canvas(self.value[0], self.value[1])
+        x2, y2 = self._to_canvas(self.value[2], self.value[3])
+
+        # Dim everything outside the box so a small selection is obvious
+        # on a busy screenshot.
+        left, top = self.offset
+        right = left + self.shot.width * self.scale
+        bottom = top + self.shot.height * self.scale
+        for box in ((left, top, right, y1), (left, y2, right, bottom),
+                    (left, y1, x1, y2), (x2, y1, right, y2)):
+            self.canvas.create_rectangle(*box, fill="#0b0c0e", outline="",
+                                         stipple="gray50")
+
+        self.canvas.create_rectangle(x1 - 1, y1 - 1, x2 + 1, y2 + 1,
+                                     outline="#101114", width=3)
+        self.canvas.create_rectangle(x1, y1, x2, y2, outline=theme.ACCENT, width=1)
+        for cx, cy in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
+            self.canvas.create_rectangle(cx - 2, cy - 2, cx + 2, cy + 2,
+                                         outline=theme.ACCENT, fill=theme.ACCENT)
 
     def _update_readout(self):
         if not self.value:
@@ -340,27 +396,72 @@ class PixelOCRTab:
         self._draw_magnifier()
 
     def _draw_magnifier(self):
-        """The pixels around the target at 8x, so the exact pixel is
-        visible without squinting at a scaled-down preview."""
         self.magnifier.delete("all")
         if self.shot is None or not self.value:
+            self.preview_caption.configure(text="")
             return
+        if len(self.value) == 2:
+            self._preview_point()
+        else:
+            self._preview_box()
+
+    def _preview_point(self):
+        """The pixels around the target at 8x, so the exact pixel is
+        visible without squinting at a scaled-down preview."""
         zoom = 8
-        width, height = 200 // zoom, 120 // zoom
-        cx = self.value[0] if len(self.value) == 2 else (self.value[0] + self.value[2]) // 2
-        cy = self.value[1] if len(self.value) == 2 else (self.value[1] + self.value[3]) // 2
+        width, height = PREVIEW_W // zoom, PREVIEW_H // zoom
+        cx, cy = self.value
         left = max(0, min(self.shot.width - width, cx - width // 2))
         top = max(0, min(self.shot.height - height, cy - height // 2))
 
         crop = self.shot.crop((left, top, left + width, top + height))
-        crop = crop.resize((width * zoom, height * zoom), Image.NEAREST)
-        self._magnifier_photo = ImageTk.PhotoImage(crop)
+        self._magnifier_photo = ImageTk.PhotoImage(
+            crop.resize((width * zoom, height * zoom), Image.NEAREST))
         self.magnifier.create_image(0, 0, image=self._magnifier_photo, anchor="nw")
 
         mx = (cx - left) * zoom + zoom // 2
         my = (cy - top) * zoom + zoom // 2
-        self.magnifier.create_line(mx - 10, my, mx + 10, my, fill=theme.ACCENT)
-        self.magnifier.create_line(mx, my - 10, mx, my + 10, fill=theme.ACCENT)
+        self.magnifier.create_line(0, my, PREVIEW_W, my, fill=theme.ACCENT)
+        self.magnifier.create_line(mx, 0, mx, PREVIEW_H, fill=theme.ACCENT)
+        self.preview_caption.configure(text=f"Around the target at {zoom}x")
+
+    def _preview_box(self):
+        """Everything inside the box, blown up as far as it fits.
+
+        A fixed window would only ever show the middle of the selection,
+        which is no use for checking whether the edges clip a digit - the
+        whole point of looking.
+        """
+        x1, y1, x2, y2 = self.value
+        left = max(0, min(x1, self.shot.width - 1))
+        top = max(0, min(y1, self.shot.height - 1))
+        right = max(left + 1, min(x2, self.shot.width))
+        bottom = max(top + 1, min(y2, self.shot.height))
+
+        crop = self.shot.crop((left, top, right, bottom))
+        # Whole pixels only: a fractional zoom blurs the 1px glyph edges
+        # that decide whether the box is cutting a character in half.
+        zoom = min(PREVIEW_W // crop.width, PREVIEW_H // crop.height)
+        if zoom >= 1:
+            view = crop.resize((crop.width * zoom, crop.height * zoom), Image.NEAREST)
+            note = f"Whole selection at {zoom}x"
+        else:
+            ratio = min(PREVIEW_W / crop.width, PREVIEW_H / crop.height)
+            view = crop.resize((max(1, int(crop.width * ratio)),
+                                max(1, int(crop.height * ratio))), Image.LANCZOS)
+            note = "Whole selection, shrunk to fit"
+
+        self._magnifier_photo = ImageTk.PhotoImage(view)
+        self.magnifier.create_image(PREVIEW_W // 2, PREVIEW_H // 2,
+                                    image=self._magnifier_photo, anchor="center")
+
+        # Outline the edge of the selection so it's clear where the box
+        # stops and the empty canvas begins.
+        ox = (PREVIEW_W - view.width) // 2
+        oy = (PREVIEW_H - view.height) // 2
+        self.magnifier.create_rectangle(ox, oy, ox + view.width, oy + view.height,
+                                        outline=theme.ACCENT)
+        self.preview_caption.configure(text=note)
 
     # -- editing ---------------------------------------------------------
 
@@ -539,6 +640,9 @@ class PixelOCRTab:
 
     def refresh(self):
         self._refresh_target_list()
+        self.capture_hint.configure(text=self._capture_hint_text())
+        if self.shot is None:
+            self._draw()
         saved = [d["label"] for d in config.TEMPLATE_DEFINITIONS
                  if config.get_template_path(self.app.settings, d["key"])]
         self.template_status.configure(

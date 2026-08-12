@@ -15,8 +15,10 @@ import customtkinter as ctk
 import config
 import engine
 import keybinds
+import updater
 from applog import log
 from ui import theme
+from version import VERSION
 from ui.tab_ahflip import AHFlipTab
 from ui.tab_dashboard import DashboardTab
 from ui.tab_keybinds import KeybindsTab
@@ -32,7 +34,7 @@ class App(ctk.CTk):
         super().__init__()
         theme.apply()
 
-        self.title("DonutSMP AH Macro")
+        self.title(f"DonutSMP AH Macro {VERSION}")
         self.geometry("1080x760")
         self.minsize(940, 660)
         self.configure(fg_color=theme.BG)
@@ -51,12 +53,16 @@ class App(ctk.CTk):
             "toggle": lambda: self.after(0, self.toggle_macro),
             "pause": lambda: self.after(0, self.toggle_pause),
             "emergency_stop": lambda: self.after(0, self.emergency_stop),
+            "capture": lambda: self.after(0, self.capture_screen),
         })
         self.refresh_keybinds()
 
         log.subscribe(self._on_log)
-        log.info("Application started")
+        log.info(f"Application started (version {VERSION})")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        if (self.settings.get("general") or {}).get("check_updates_on_start", True):
+            updater.check_async(lambda u: self.after(0, self.offer_update, u))
 
     # -- layout ----------------------------------------------------------
 
@@ -65,6 +71,8 @@ class App(ctk.CTk):
         header.pack(fill="x", padx=18, pady=(14, 4))
 
         theme.heading(header, "DonutSMP AH Macro", 20).pack(side="left")
+        ctk.CTkLabel(header, text=f"  v{VERSION}", font=theme.font(11),
+                     text_color=theme.TEXT_MUTED).pack(side="left", pady=(6, 0))
 
         self.header_status = ctk.CTkLabel(header, text="STOPPED",
                                           font=theme.font(14, "bold"),
@@ -116,6 +124,81 @@ class App(ctk.CTk):
     def refresh_keybinds(self):
         self.keybind_manager.settings = self.settings
         self.keybind_manager.apply()
+
+    def capture_screen(self):
+        """Grab the screen for the editor. Bound to a hotkey so it can be
+        pressed while Minecraft is still in front - the window is only
+        raised afterwards, once the screenshot is already taken."""
+        self.pixelocr.capture_now()
+        self.tabview.set("Pixel / OCR")
+        self.lift()
+        self.focus_force()
+
+    # -- updates -----------------------------------------------------------
+
+    def offer_update(self, update):
+        """Ask before downloading. Never automatic: the update restarts the
+        program, and doing that on its own would kill a run mid-batch."""
+        window = ctk.CTkToplevel(self)
+        window.title("Update available")
+        window.geometry("460x300")
+        window.configure(fg_color=theme.BG)
+        window.transient(self)
+
+        theme.heading(window, f"Version {update.version} is available", 16).pack(
+            padx=20, pady=(20, 4), anchor="w")
+        ctk.CTkLabel(window, text=f"You have {VERSION}.", font=theme.font(12),
+                     text_color=theme.TEXT_MUTED).pack(padx=20, anchor="w")
+
+        notes = ctk.CTkTextbox(window, height=120, fg_color=theme.PANEL_LIGHT,
+                               font=theme.font(11))
+        notes.pack(fill="x", padx=20, pady=12)
+        notes.insert("1.0", update.notes.strip() or "No release notes.")
+        notes.configure(state="disabled")
+
+        status = theme.caption(window, "")
+        status.pack(padx=20, anchor="w")
+
+        buttons = ctk.CTkFrame(window, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=14)
+        theme.subtle_button(buttons, "Not now", window.destroy,
+                            width=100).pack(side="right", padx=4)
+        install = theme.primary_button(
+            buttons, "Update and restart", lambda: None, width=170)
+        install.pack(side="right", padx=4)
+
+        def run_update():
+            install.configure(state="disabled")
+            status.configure(text="Downloading...")
+
+            def say(text):
+                self.after(0, lambda: status.configure(text=text))
+
+            def worker():
+                try:
+                    path = updater.download(
+                        update,
+                        on_progress=lambda f: say(f"Downloading... {int(f * 100)}%"))
+                except Exception as e:
+                    say(f"Download failed: {e}")
+                    self.after(0, lambda: install.configure(state="normal"))
+                    log.error(f"Update download failed: {e}")
+                    return
+                self.after(0, finish, path)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def finish(path):
+            self.running = False
+            if updater.apply_and_restart(path):
+                self.save_settings()
+                self.destroy()
+            else:
+                status.configure(text=f"Downloaded to {path} - "
+                                      f"running from source, so swap it yourself.")
+                install.configure(state="normal")
+
+        install.configure(command=run_update)
 
     # -- macro control -----------------------------------------------------
 
