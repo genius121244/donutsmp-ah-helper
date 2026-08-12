@@ -30,6 +30,8 @@ general       retry limits and fail-safe behaviour
 import copy
 import json
 import os
+import shutil
+import zipfile
 
 _APP_DIR_NAME = "DonutAHMacro"
 
@@ -55,10 +57,6 @@ POINT_DEFINITIONS = [
      "help": "First click after /order opens."},
     {"key": "order_menu_click2", "label": "Order Menu - Click 2",
      "help": "Second click, opens the order itself."},
-    {"key": "order_full_click", "label": "Order Full Option",
-     "help": "The 'full' collect option in the order menu."},
-    {"key": "order_partial_click", "label": "Order Partial Option",
-     "help": "The 'partial' collect option in the order menu."},
     {"key": "shop_hover_item", "label": "Shop - Item to Hover",
      "help": "Item in /shop whose tooltip shows the market price."},
 ]
@@ -76,6 +74,10 @@ REGION_DEFINITIONS = [
      "help": "Box around the market price in the /shop tooltip."},
     {"key": "money_region", "label": "Money (OCR)", "ocr": True,
      "help": "Box around your balance, read during the selling phase."},
+    {"key": "order_partial_region", "label": "Order Partial Option (match box)", "ocr": False,
+     "help": "Screenshot box for the partial-order button; matched against its saved reference."},
+    {"key": "order_full_region", "label": "Order Full Option (match box)", "ocr": False,
+     "help": "Screenshot box for the full-order button; matched against its saved reference."},
 ]
 REGION_DEFINITIONS += [
     {"key": "hotbar_strip", "label": "Hotbar (all 9 slots)", "ocr": False,
@@ -109,6 +111,8 @@ TEMPLATE_DEFINITIONS = [
      "help": "Screenshot of one EMPTY hotbar slot."},
     {"key": "empty_order_slot", "label": "Empty Order Slot",
      "help": "Screenshot of one EMPTY order GUI slot."},
+    {"key": "order_menu_ref", "label": "Order Menu Reference",
+     "help": "Saved image used to pick the matching partial/full button from the two match boxes."},
 ]
 
 KEYBIND_DEFINITIONS = [
@@ -414,3 +418,72 @@ def timing(settings, key):
     """(min_ms, max_ms) for a delay, falling back to the shipped default."""
     value = (settings.get("timing") or {}).get(key) or DEFAULT_TIMING.get(key, [0, 0])
     return int(value[0]), int(value[1])
+
+
+# ----------------------------------------------------------------------
+# Sharing a setup with someone else
+# ----------------------------------------------------------------------
+
+BUNDLE_SETTINGS_NAME = "settings.json"
+BUNDLE_TEMPLATE_DIR = "templates"
+
+
+def export_bundle(settings, path):
+    """Write a .zip holding the settings plus every reference image.
+
+    The reference images have to travel with the file: `templates` stores
+    absolute paths, and someone else's machine has no C:\\Users\\you. Inside
+    the zip they are stored relative, and `import_bundle` rewrites them to
+    wherever they land on the receiving machine.
+    """
+    data = copy.deepcopy(settings)
+    templates = data.get("templates") or {}
+    packed = {}
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for key, source in templates.items():
+            if not source or not os.path.exists(source):
+                continue
+            name = f"{BUNDLE_TEMPLATE_DIR}/{key}{os.path.splitext(source)[1] or '.png'}"
+            bundle.write(source, name)
+            packed[key] = name
+        data["templates"] = packed
+        bundle.writestr(BUNDLE_SETTINGS_NAME, json.dumps(data, indent=2))
+
+    return path
+
+
+def import_bundle(path):
+    """Load a bundle written by `export_bundle` and return the settings.
+
+    Nothing is saved here - the caller decides. Template images are copied
+    into this machine's template folder and the paths repointed at them.
+    """
+    with zipfile.ZipFile(path) as bundle:
+        names = set(bundle.namelist())
+        if BUNDLE_SETTINGS_NAME not in names:
+            raise ValueError("That zip has no settings.json in it - it isn't "
+                             "a config export.")
+        data = json.loads(bundle.read(BUNDLE_SETTINGS_NAME).decode("utf-8"))
+
+        os.makedirs(TEMPLATE_DIR, exist_ok=True)
+        rewritten = {}
+        for key, name in (data.get("templates") or {}).items():
+            # Only ever read the entry this settings file points at, and
+            # write it under a name we chose: a zip can otherwise carry
+            # paths like ../../ and land a file wherever it likes.
+            if not name or name not in names:
+                continue
+            target = os.path.join(TEMPLATE_DIR,
+                                  f"{key}{os.path.splitext(name)[1] or '.png'}")
+            with bundle.open(name) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            rewritten[key] = target
+        data["templates"] = rewritten
+
+    settings = _deep_merge(DEFAULT_SETTINGS, _migrate(data))
+    if not settings.get("items"):
+        add_item(settings, "Firework Rocket")
+    if settings.get("active_item") not in item_names(settings):
+        settings["active_item"] = item_names(settings)[0]
+    return settings

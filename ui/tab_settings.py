@@ -13,6 +13,7 @@ import threading
 import time
 
 import customtkinter as ctk
+from tkinter import filedialog
 
 import config
 import updater
@@ -51,6 +52,7 @@ class SettingsTab:
     def _build(self):
         scroll = ctk.CTkScrollableFrame(self.parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=14, pady=14)
+        theme.enable_mousewheel_scroll(scroll)
 
         # -- detection -------------------------------------------------------
         detection = theme.card(scroll)
@@ -131,8 +133,21 @@ class SettingsTab:
         ctk.CTkButton(row, text="Reset timings", width=130, fg_color=theme.RED,
                       hover_color=theme.RED_HOVER,
                       command=self.reset_timings).pack(side="left", padx=3)
+
+        theme.caption(files,
+                      "Share your whole setup as one file (settings + reference "
+                      "images).\nOnly lines up on a machine with the same screen "
+                      "resolution and\nMinecraft GUI scale - otherwise the boxes "
+                      "land in the wrong place.").pack(anchor="w", padx=16)
+        share = ctk.CTkFrame(files, fg_color="transparent")
+        share.pack(fill="x", padx=16, pady=(6, 0))
+        theme.subtle_button(share, "Export config", self.export_config,
+                            width=130).pack(side="left", padx=3)
+        theme.subtle_button(share, "Import config", self.import_config,
+                            width=130).pack(side="left", padx=3)
+
         self.status = theme.caption(files, "")
-        self.status.pack(anchor="w", padx=16, pady=(0, 14))
+        self.status.pack(anchor="w", padx=16, pady=(6, 14))
 
     # -- field builders --------------------------------------------------
 
@@ -207,6 +222,47 @@ class SettingsTab:
         shutil.copy2(config.CONFIG_PATH, target)
         self.status.configure(text=f"Backed up to {os.path.basename(target)}")
         log.success(f"Settings backed up to {target}")
+
+    def export_config(self):
+        """Everything needed to reproduce this setup, in one zip."""
+        self.app.save_settings()
+        path = filedialog.asksaveasfilename(
+            title="Export config", defaultextension=".zip",
+            initialfile=f"donut-ah-config-{time.strftime('%Y%m%d')}.zip",
+            filetypes=[("Config bundle", "*.zip")])
+        if not path:
+            return
+        try:
+            config.export_bundle(self.app.settings, path)
+        except OSError as e:
+            self.status.configure(text=f"Could not export: {e}")
+            log.error(f"Config export failed: {e}")
+            return
+        self.status.configure(text=f"Exported to {os.path.basename(path)}")
+        log.success(f"Config exported to {path}")
+
+    def import_config(self):
+        """Replace everything with someone else's setup.
+
+        A backup is taken first, unprompted: this overwrites every
+        coordinate, and there is no undo otherwise.
+        """
+        path = filedialog.askopenfilename(
+            title="Import config", filetypes=[("Config bundle", "*.zip")])
+        if not path:
+            return
+        try:
+            imported = config.import_bundle(path)
+        except (OSError, ValueError, KeyError) as e:
+            self.status.configure(text=f"Could not import: {e}")
+            log.error(f"Config import failed: {e}")
+            return
+
+        self.backup()
+        self.app.replace_settings(imported)
+        self.status.configure(text=f"Imported {os.path.basename(path)} "
+                                   f"(your old config was backed up first)")
+        log.success(f"Config imported from {path}")
 
     def open_folder(self):
         folder = os.path.dirname(config.CONFIG_PATH)

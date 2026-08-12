@@ -122,9 +122,21 @@ class PixelOCRTab:
         self.canvas.bind("<Return>", lambda _e: self.save_value())
         self.canvas.bind("<Escape>", lambda _e: self.reset_value())
 
-        side = ctk.CTkFrame(body, fg_color="transparent", width=250)
-        side.pack(side="left", fill="y", padx=(10, 0))
-        side.pack_propagate(False)
+        side_container = ctk.CTkFrame(body, fg_color="transparent", width=250)
+        side_container.pack(side="left", fill="y", padx=(10, 0), pady=(0, 10))
+        side_container.pack_propagate(False)
+
+        side = ctk.CTkScrollableFrame(side_container, fg_color="transparent")
+        side.pack(side="left", fill="both", expand=True)
+        theme.enable_mousewheel_scroll(side)
+
+        side_canvas = getattr(side, "_canvas", None) or getattr(side, "canvas", None)
+        if side_canvas is not None:
+            side_scrollbar = ctk.CTkScrollbar(side_container, orientation="vertical",
+                                             command=side_canvas.yview)
+            side_scrollbar.pack(side="right", fill="y")
+            side_canvas.configure(yscrollcommand=side_scrollbar.set)
+
         self._build_side_panel(side)
 
     def _build_side_panel(self, parent):
@@ -170,23 +182,34 @@ class PixelOCRTab:
             fill="x", padx=12, pady=2)
         theme.subtle_button(test, "Test order slots", lambda: self.test_slots("order")).pack(
             fill="x", padx=12, pady=2)
-        self.test_output = ctk.CTkTextbox(test, height=140, fg_color=theme.PANEL_LIGHT,
+        self.test_output = ctk.CTkTextbox(test, height=120, fg_color=theme.PANEL_LIGHT,
                                           font=theme.font(11))
         self.test_output.pack(fill="x", padx=12, pady=(6, 12))
 
         templates = theme.card(parent)
         templates.pack(fill="x")
-        theme.heading(templates, "Empty-slot references", 14).pack(
+        theme.heading(templates, "Reference images", 14).pack(
             anchor="w", padx=12, pady=(12, 2))
         theme.caption(templates,
-                      "Frame an EMPTY slot with a box above, then save it here. "
-                      "Slot detection compares against these.").pack(
+                      "Save one reference image for the menu option, then set the two match boxes "
+                      "for partial and full. The macro compares each live box to the same reference "
+                      "and clicks the one that matches.").pack(
             anchor="w", padx=12)
+
+        template_frame = ctk.CTkFrame(templates, fg_color="transparent")
+        template_frame.pack(fill="x", padx=12, pady=(4, 0))
+
+        self.template_status_labels = {}
         for definition in config.TEMPLATE_DEFINITIONS:
-            row = ctk.CTkFrame(templates, fg_color="transparent")
-            row.pack(fill="x", padx=12, pady=4)
-            ctk.CTkLabel(row, text=definition["label"], anchor="w",
-                         font=theme.font(11)).pack(side="left")
+            row = ctk.CTkFrame(template_frame, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            left = ctk.CTkFrame(row, fg_color="transparent")
+            left.pack(side="left", fill="both", expand=True)
+            ctk.CTkLabel(left, text=definition["label"], anchor="w",
+                         font=theme.font(11)).pack(anchor="w")
+            status_text = "saved" if config.get_template_path(self.app.settings, definition["key"]) else "not saved"
+            self.template_status_labels[definition["key"]] = theme.caption(left, status_text)
+            self.template_status_labels[definition["key"]].pack(anchor="w")
             theme.subtle_button(
                 row, "Save box as this", width=110,
                 command=lambda d=definition: self.save_template(d["key"])).pack(side="right")
@@ -342,21 +365,18 @@ class PixelOCRTab:
         you are aiming at.
         """
         x, y = self._to_canvas(*self.value)
-        left, top = self.offset
-        right = left + self.shot.width * self.scale
-        bottom = top + self.shot.height * self.scale
-        gap = 5  # keep the exact pixel clear of ink
+        length = 12
+        gap = 2  # keep the exact pixel clear of ink
 
-        for coords in (((left, y), (x - gap, y)), ((x + gap, y), (right, y)),
-                       ((x, top), (x, y - gap)), ((x, y + gap), (x, bottom))):
+        for coords in (((x - length, y), (x - gap, y)), ((x + gap, y), (x + length, y)),
+                       ((x, y - length), (x, y - gap)), ((x, y + gap), (x, y + length))):
             (ax, ay), (bx, by) = coords
-            # Dark line underneath so the hairline stays visible over both
-            # the bright GUI and the dark inventory background.
+            # Short lines keep the exact pixel visible while still marking it.
             self.canvas.create_line(ax, ay, bx, by, fill="#101114", width=3)
             self.canvas.create_line(ax, ay, bx, by, fill=theme.ACCENT, width=1)
 
         self.canvas.create_rectangle(x - 1, y - 1, x + 1, y + 1,
-                                     outline=theme.ACCENT)
+                                     outline=theme.ACCENT, width=1)
 
     def _draw_box(self):
         x1, y1 = self._to_canvas(self.value[0], self.value[1])
@@ -632,6 +652,7 @@ class PixelOCRTab:
         self.shot.crop(tuple(self.value)).save(path)
         config.set_template_path(self.app.settings, key, path)
         self.app.save_settings()
+        self.refresh()
         self.template_status.configure(text=f"Saved {key}.png")
         log.success(f"Saved empty-slot reference '{key}' from "
                     f"{self._format(self.value)}")
@@ -645,5 +666,9 @@ class PixelOCRTab:
             self._draw()
         saved = [d["label"] for d in config.TEMPLATE_DEFINITIONS
                  if config.get_template_path(self.app.settings, d["key"])]
+        for d in config.TEMPLATE_DEFINITIONS:
+            label = self.template_status_labels.get(d["key"])
+            if label:
+                label.configure(text=("saved" if config.get_template_path(self.app.settings, d["key"]) else "not saved"))
         self.template_status.configure(
             text=("Saved: " + ", ".join(saved)) if saved else "No references saved yet.")

@@ -35,6 +35,7 @@ import config
 import detect
 import ocr
 import pricing
+import screen
 import slots
 from actions import Actions, Stopped
 from applog import log
@@ -147,15 +148,42 @@ class Engine:
 
     # -- states ----------------------------------------------------------
 
+    def _choose_order_menu_option(self):
+        """Pick the matching option using one reference image and two match
+        boxes. The order menu shows both partial/full choices; whichever box
+        looks closest to the saved reference is clicked."""
+        template_path = config.get_template_path(self.settings, "order_menu_ref")
+        if not template_path:
+            return
+
+        template = detect.load_template(template_path)
+        best_region = None
+        best_score = None
+        for name in ("order_partial", "order_full"):
+            region_key = f"{name}_region"
+            region = config.get_region(self.settings, region_key, self.item)
+            if not region:
+                continue
+
+            screen_image = screen.grab(tuple(region))
+            score = detect.difference(screen_image, template)
+            log.info(f"Order menu match '{name}': difference={score:.2f}")
+            if best_score is None or score < best_score:
+                best_region = region
+                best_score = score
+
+        if best_region is None:
+            return
+
+        x1, y1, x2, y2 = best_region
+        self.actions.click((x1 + x2) // 2, (y1 + y2) // 2)
+
     def open_order_gui(self):
-        """/order, then the two menu clicks and the full/partial choice."""
+        """/order, then the two menu clicks and the partial/full choice."""
         self.actions.send_command("order")
         self.actions.click_point("order_menu_click1")
         self.actions.click_point("order_menu_click2")
-        self.actions.click_point(
-            "order_full_click" if self.item.get("order_full", True)
-            else "order_partial_click"
-        )
+        self._choose_order_menu_option()
 
     def pick_up(self, order_slot, before_states):
         """Take one order slot and prove the hotbar changed.
@@ -200,16 +228,15 @@ class Engine:
         """Top the hotbar up to the batch size. Returns (items in hotbar,
         whether the order came up short)."""
         self.set_state(CHECKING_HOTBAR)
+        self.open_order_gui()
         hotbar = self.read_hotbar()
         batch_size = int(self.item.get("batch_size", 9))
         needed = slots.pickups_needed(hotbar, batch_size)
 
         if needed == 0:
             log.info(f"Hotbar already holds a full batch of {batch_size}")
-            return slots.count(hotbar, detect.OCCUPIED), False
-
-        log.info(f"Need {needed} more item(s) to reach a batch of {batch_size}")
-        self.open_order_gui()
+        else:
+            log.info(f"Need {needed} more item(s) to reach a batch of {batch_size}")
 
         self.set_state(CHECKING_ORDER)
         order = self.read_order()
@@ -227,13 +254,13 @@ class Engine:
         return slots.count(hotbar, detect.OCCUPIED), short
 
     def read_market_price(self):
-        """Open /shop, hover the item, read the cheapest listing. None if
-        the read wasn't trustworthy."""
+        """Hover the shop tooltip and read the cheapest listing while /shop
+        remains open. The caller decides whether to keep waiting or close it.
+        """
         self.set_state(CHECKING_PRICE)
         region = self.actions.require_region("price_tooltip_region")
         hover = config.get_hover_point(self.settings, "price_tooltip_region", self.item)
 
-        self.actions.send_command("shop")
         if hover:
             self.actions.hover(hover[0], hover[1])
         else:
@@ -242,7 +269,6 @@ class Engine:
         self.actions.wait("hover")
 
         price = ocr.get_lowest_price(region)
-        self.actions.close_menu()
 
         if price is None:
             log.warning("Could not read a trustworthy market price")
@@ -256,42 +282,46 @@ class Engine:
     def determine_listing_price(self):
         """The price string to type into /ah sell, or None if stopped.
 
-        Below the floor it stays in the watch loop, re-reading the market
-        every few seconds, exactly as before - the item isn't listed at a
-        loss just to keep the macro moving.
+        The /shop window stays open for the whole wait loop so the tooltip can
+        keep being re-read while the price is below the floor. Only once the
+        price is acceptable do we close it and proceed to the sell command.
         """
-        while self._running_and_unpaused():
-            price = self.read_market_price()
+        self.actions.send_command("shop")
+        try:
+            while self._running_and_unpaused():
+                price = self.read_market_price()
 
-            if price is None:
-                if not self.item.get("use_ocr_undercut", True):
-                    break
-                fallback = str(self.item.get("sell_price", "")).strip()
-                if fallback:
-                    log.warning(f"Falling back to the fixed sell price {fallback}")
-                    return fallback
-                raise UnexpectedState(
-                    "No readable market price and no fixed sell price set. "
-                    "Stopping rather than listing at a guessed price."
-                )
+                if price is None:
+                    if not self.item.get("use_ocr_undercut", True):
+                        break
+                    fallback = str(self.item.get("sell_price", "")).strip()
+                    if fallback:
+                        log.warning(f"Falling back to the fixed sell price {fallback}")
+                        return fallback
+                    raise UnexpectedState(
+                        "No readable market price and no fixed sell price set. "
+                        "Stopping rather than listing at a guessed price."
+                    )
 
-            self.set_state(CALCULATING_PRICE)
-            decision = pricing.decide(price, self.item)
-            log.info(f"{decision.action.upper()}: {decision.reason}")
+                self.set_state(CALCULATING_PRICE)
+                decision = pricing.decide(price, self.item)
+                log.info(f"{decision.action.upper()}: {decision.reason}")
 
-            if decision.action == pricing.WAIT:
-                self.stats.phase = "WATCHING"
+                if decision.action == pricing.WAIT:
+                    self.stats.phase = "WATCHING"
+                    self._push_stats()
+                    self.actions.wait("watch")
+                    continue
+
+                self.stats.listing_price = decision.price
                 self._push_stats()
-                self.actions.wait("watch")
-                continue
+                return ocr.format_price(decision.price)
 
-            self.stats.listing_price = decision.price
-            self._push_stats()
-            return ocr.format_price(decision.price)
-
-        if not self.item.get("use_ocr_undercut", True):
-            return str(self.item.get("sell_price", "32k"))
-        return None
+            if not self.item.get("use_ocr_undercut", True):
+                return str(self.item.get("sell_price", "32k"))
+            return None
+        finally:
+            self.actions.close_menu()
 
     def read_money(self):
         """The balance, if a money box is configured. Optional: not every
@@ -313,60 +343,40 @@ class Engine:
         return money
 
     def sell_one(self, slot, listing_price):
-        """Select a hotbar slot, list it, and confirm the slot emptied."""
-        limit = self._retry_limit("sell_verify_retry_limit", 2)
-
-        for attempt in range(1, limit + 1):
-            self.set_state(SELLING)
-            self.actions.select_hotbar_slot(slot)
-            log.info(f"Selling hotbar slot {slot} at {listing_price}")
-            self.actions.send_command(f"ah sell {listing_price}")
-            self.actions.wait("sell")
-
-            self.set_state(VERIFYING_SALE)
-            self.actions.wait("inventory_settle")
-            states = self.read_hotbar()
-            if states[slot - 1] == detect.EMPTY:
-                log.success(f"Slot {slot} listed at {listing_price}")
-                return True
-            log.warning(f"Slot {slot} still holds an item after selling "
-                        f"(attempt {attempt}/{limit})")
-
-        raise UnexpectedState(
-            f"Hotbar slot {slot} did not empty after listing it {limit} times. "
-            f"The item may be unsellable, or /ah sell was rejected."
-        )
+        """Select a hotbar slot and sell it. We intentionally do not re-read
+        the hotbar immediately after sending /ah sell, because the inventory
+        refresh can lag behind the click and a stale hotbar state is not a
+        valid reason to declare the sale failed."""
+        self.set_state(SELLING)
+        self.actions.select_hotbar_slot(slot)
+        log.info(f"Selling hotbar slot {slot} at {listing_price}")
+        self.actions.send_command(f"ah sell {listing_price}")
+        self.actions.wait("sell")
+        return True
 
     def sell_batch(self):
-        """List everything in the hotbar. Returns how many were listed.
-
-        The balance is read once before and once after: during selling the
-        screen is at its cleanest, which is where the money box is easiest
-        to read reliably.
-        """
-        states = self.read_hotbar()
-        to_sell = slots.occupied_slots(states)
-        if not to_sell:
-            log.info("Nothing in the hotbar to sell")
-            return 0
-
-        log.info(f"Selling {len(to_sell)} item(s) from slots {to_sell}")
+        """List each currently occupied hotbar slot in order. We take one
+        snapshot of the hotbar, then sell slot-by-slot without re-reading the
+        hotbar mid-loop; that keeps the sequence stable and prevents false
+        retries on stale inventory data."""
         self.set_state(CHECKING_MONEY)
         self.read_money()
 
-        per_sell = (self.settings.get("general") or {}).get("price_check_per_sell", True)
-        listing_price = None
+        states = self.read_hotbar()
+        to_sell = slots.occupied_slots(states)
+        if not to_sell:
+            self.set_state(CHECKING_MONEY)
+            self.read_money()
+            self._push_stats()
+            return 0
 
         sold = 0
         for slot in to_sell:
             self._wait_while_paused()
-            if per_sell or listing_price is None:
-                # Re-reading before every listing costs a /shop round trip
-                # but reacts to the market moving mid-batch, which is what
-                # the original did and what stops a stale undercut.
-                listing_price = self.determine_listing_price()
-                if listing_price is None:
-                    break
+            self.actions.select_hotbar_slot(slot)
+            listing_price = self.determine_listing_price()
+            if listing_price is None:
+                break
             self.sell_one(slot, listing_price)
             sold += 1
 

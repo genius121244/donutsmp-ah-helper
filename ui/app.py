@@ -113,6 +113,20 @@ class App(ctk.CTk):
     def active_item(self):
         return config.active_item(self.settings)
 
+    def replace_settings(self, settings):
+        """Swap in a whole different config (an imported one).
+
+        The dict is replaced rather than mutated in place, so anything
+        holding the old one - the keybind manager especially - has to be
+        pointed at the new dict before the tabs redraw from it.
+        """
+        self.settings = settings
+        self.save_settings()
+        self.refresh_keybinds()
+        for tab in self.tabs:
+            if hasattr(tab, "refresh"):
+                tab.refresh()
+
     def notify_settings_changed(self, source=None):
         """Tell every tab to re-read the settings (item renamed, keybind
         changed, ...) so two tabs can't show different values."""

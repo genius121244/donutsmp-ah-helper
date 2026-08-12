@@ -17,7 +17,7 @@ Build one yourself with `python build.py` on Windows.
 To publish a new version: set the number in `version.py`, then
 
 ```
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
 GitHub builds the exe and creates the release; everyone running an older
@@ -55,10 +55,26 @@ What you need to set before the macro will start:
   you actually play at.
 - **Price tooltip (OCR)** plus its **hover point**, and the click points
   for the order menu.
+- **Order partial/full match boxes** plus one **Order Menu Reference**
+  image. The order menu puts the option you want on either side, so the
+  macro screenshots both boxes, compares each to that reference and clicks
+  whichever one matches. Without the reference it clicks neither.
 - **Money (OCR)** and its hover point, if you want balance tracking.
 
 Then in **AH Flip**, set the item's batch size, undercut and minimum price.
 The item name is just a label for you.
+
+## Giving your setup to a friend
+
+**Settings → Export config** writes one `.zip` holding your settings *and*
+your reference images; they take it and press **Import config** (their old
+config is backed up first). Every coordinate in it is in screen pixels, so
+it only lands correctly if they run the same screen resolution and the same
+Minecraft GUI scale as you — otherwise they'll have to redo the boxes.
+
+Each Windows account keeps its own settings in its own `%APPDATA%`, so the
+same exe can be run by different people on one PC without them fighting
+over coordinates.
 
 ## How a cycle runs
 
@@ -72,7 +88,9 @@ The item name is just a label for you.
 3. Read the cheapest listing with the font reader, subtract your undercut,
    and check it against your floor. Below the floor it waits instead of
    selling.
-4. Sell the batch, verifying each slot actually emptied.
+4. Sell the batch a slot at a time. The hotbar is *not* re-read straight
+   after `/ah sell` — the inventory refresh lags the click, and a stale
+   read is not a good enough reason to declare a sale failed.
 5. Read your balance while the sell GUI is up (that's the cleanest moment
    to read it), then start again.
 

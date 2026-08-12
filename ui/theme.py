@@ -7,6 +7,7 @@ read for hours, and greys give room for a visual hierarchy (window <
 panel < input) that a flat black doesn't.
 """
 
+import tkinter as tk
 import customtkinter as ctk
 
 BG = "#1e1f22"          # window
@@ -79,6 +80,57 @@ def subtle_button(parent, text, command, **kwargs):
     kwargs.setdefault("hover_color", BORDER)
     kwargs.setdefault("text_color", TEXT)
     return ctk.CTkButton(parent, text=text, command=command, **kwargs)
+
+
+def enable_mousewheel_scroll(frame):
+    """Enable mouse-wheel scrolling for a CTkScrollableFrame.
+
+    The exact internal canvas name varies across customtkinter versions,
+    so we search recursively for any widget that supports yview_scroll.
+    """
+    def _find_scrolling_widget(widget):
+        if hasattr(widget, "yview_scroll"):
+            return widget
+        for child in widget.winfo_children():
+            found = _find_scrolling_widget(child)
+            if found:
+                return found
+        return None
+
+    canvas = getattr(frame, "_canvas", None) or getattr(frame, "canvas", None)
+    if canvas is None:
+        canvas = _find_scrolling_widget(frame)
+    if canvas is None:
+        return
+
+    def _on_wheel(event):
+        delta = 0
+        if hasattr(event, "delta") and event.delta:
+            delta = -1 if event.delta > 0 else 1
+        elif getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        if delta:
+            canvas.yview_scroll(delta, "units")
+            return "break"
+
+    def _bind_wheel(_event=None):
+        frame.bind_all("<MouseWheel>", _on_wheel)
+        frame.bind_all("<Button-4>", _on_wheel)
+        frame.bind_all("<Button-5>", _on_wheel)
+
+    def _unbind_wheel(_event=None):
+        frame.unbind_all("<MouseWheel>")
+        frame.unbind_all("<Button-4>")
+        frame.unbind_all("<Button-5>")
+
+    frame.bind("<Enter>", lambda e: frame.focus_set())
+    frame.bind("<Enter>", _bind_wheel)
+    frame.bind("<Leave>", _unbind_wheel)
+    canvas.bind("<MouseWheel>", _on_wheel)
+    canvas.bind("<Button-4>", _on_wheel)
+    canvas.bind("<Button-5>", _on_wheel)
 
 
 def status_colour(state):
