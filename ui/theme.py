@@ -43,9 +43,60 @@ STATUS_COLOURS = {
 }
 
 
+# The size the layout was drawn at, and the smallest it can be squeezed to
+# before cards start clipping. On a 1366x768 laptop the design height plus
+# the taskbar doesn't fit, which is what the scaling below is for.
+DESIGN_SIZE = (1080, 760)
+MIN_SIZE = (940, 660)
+
+# Room left for the taskbar and the window's own title bar.
+_SCREEN_MARGIN = (40, 90)
+
+SCALE_LIMITS = (0.6, 1.4)
+
+
 def apply():
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
+
+
+def fit_scale(screen_w, screen_h, requested=0):
+    """How much to shrink the interface by, 1.0 being the design size.
+
+    `requested` is the user's override; 0 means work it out from the screen.
+    Auto only ever shrinks - on a big monitor the layout stays as drawn
+    rather than being blown up to fill it.
+    """
+    low, high = SCALE_LIMITS
+    if requested:
+        return round(max(low, min(high, float(requested))), 2)
+
+    # Fit the design size, not the minimum size: the point is for the whole
+    # layout to be visible on a laptop screen, not merely for the window to
+    # open. 1366x768 clears the minimum at full size and still cuts the
+    # bottom off the cards.
+    usable_w = screen_w - _SCREEN_MARGIN[0]
+    usable_h = screen_h - _SCREEN_MARGIN[1]
+    scale = min(usable_w / DESIGN_SIZE[0], usable_h / DESIGN_SIZE[1], 1.0)
+    return round(max(low, scale), 2)
+
+
+def window_size(screen_w, screen_h, scale):
+    """Starting window size in real pixels, never bigger than the screen.
+
+    Below the floor scale the window can still be taller than the screen;
+    clamping here means the buttons at the bottom stay reachable instead of
+    sitting under the taskbar.
+    """
+    width = min(int(DESIGN_SIZE[0] * scale), screen_w - _SCREEN_MARGIN[0])
+    height = min(int(DESIGN_SIZE[1] * scale), screen_h - _SCREEN_MARGIN[1])
+    return max(width, 400), max(height, 300)
+
+
+def min_window_size(screen_w, screen_h, scale):
+    width = min(int(MIN_SIZE[0] * scale), screen_w - _SCREEN_MARGIN[0])
+    height = min(int(MIN_SIZE[1] * scale), screen_h - _SCREEN_MARGIN[1])
+    return max(width, 400), max(height, 300)
 
 
 def font(size=13, weight="normal"):

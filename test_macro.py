@@ -25,6 +25,7 @@ from PIL import Image
 import config
 import detect
 import fontpack
+from ui import theme
 import keybinds
 import pricing
 import slots
@@ -528,6 +529,47 @@ class ConfigSharingTests(unittest.TestCase):
                 self.assertTrue(os.path.abspath(path).startswith(
                     os.path.abspath(receiver_dir)))
             self.assertFalse(os.path.exists(os.path.join(folder, "..", "evil.png")))
+
+
+class UIScaleTests(unittest.TestCase):
+    """Fitting the window onto whatever monitor it opens on."""
+
+    def test_a_small_laptop_screen_shrinks_the_interface(self):
+        scale = theme.fit_scale(1366, 768)
+        self.assertLess(scale, 1.0)
+        width, height = theme.window_size(1366, 768, scale)
+        self.assertLessEqual(width, 1366)
+        self.assertLessEqual(height, 768)
+
+    def test_a_big_monitor_is_left_at_the_design_size(self):
+        # Auto only ever shrinks: blowing the layout up to fill a 1440p
+        # screen would make it worse, not better.
+        self.assertEqual(theme.fit_scale(2560, 1440), 1.0)
+        self.assertEqual(theme.window_size(2560, 1440, 1.0), theme.DESIGN_SIZE)
+
+    def test_a_chosen_scale_wins_over_the_screen(self):
+        self.assertEqual(theme.fit_scale(2560, 1440, 0.7), 0.7)
+        self.assertEqual(theme.fit_scale(1366, 768, 1.25), 1.25)
+
+    def test_scales_are_clamped_to_something_usable(self):
+        low, high = theme.SCALE_LIMITS
+        self.assertEqual(theme.fit_scale(1920, 1080, 5), high)
+        self.assertEqual(theme.fit_scale(1920, 1080, 0.1), low)
+        # Even a screen too small for the floor scale gets a window that
+        # fits on it, rather than one with its buttons off the bottom.
+        scale = theme.fit_scale(640, 480)
+        self.assertEqual(scale, low)
+        width, height = theme.window_size(640, 480, scale)
+        self.assertLessEqual(width, 640)
+        self.assertLessEqual(height, 480)
+
+    def test_the_minimum_size_never_exceeds_the_window_size(self):
+        for screen in ((1366, 768), (1920, 1080), (1280, 720)):
+            scale = theme.fit_scale(*screen)
+            min_w, min_h = theme.min_window_size(*screen, scale)
+            width, height = theme.window_size(*screen, scale)
+            self.assertLessEqual(min_w, width)
+            self.assertLessEqual(min_h, height)
 
 
 class FontPackTests(unittest.TestCase):
