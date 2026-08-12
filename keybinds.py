@@ -14,10 +14,23 @@ global key hotkeys (already used for F8), pynput for mouse buttons.
 
 import threading
 
-import keyboard
-from pynput import mouse as pynput_mouse
-
 from applog import log
+
+# Both listener libraries talk to the OS input stack at import time and
+# raise on a machine with no desktop (a CI runner, a headless box). The
+# naming and conflict rules below are pure string work, so they are kept
+# importable without them; anything that actually listens checks first.
+try:
+    import keyboard
+except Exception as _e:      # pragma: no cover - platform dependent
+    keyboard = None
+    log.warning(f"Keyboard hotkeys unavailable: {_e}")
+
+try:
+    from pynput import mouse as pynput_mouse
+except Exception as _e:      # pragma: no cover - platform dependent
+    pynput_mouse = None
+    log.warning(f"Mouse bindings unavailable: {_e}")
 
 MOUSE_PREFIX = "mouse:"
 
@@ -63,14 +76,16 @@ class BindingCapture:
         self._done = threading.Event()
 
     def start(self):
-        try:
-            self._keyboard_hook = keyboard.hook(self._on_key)
-        except (ImportError, OSError) as e:
-            # The keyboard library needs elevated rights on some systems;
-            # mouse buttons can still be bound without it.
-            log.warning(f"Cannot listen for keys: {e}")
-        self._mouse_listener = pynput_mouse.Listener(on_click=self._on_click)
-        self._mouse_listener.start()
+        if keyboard is not None:
+            try:
+                self._keyboard_hook = keyboard.hook(self._on_key)
+            except (ImportError, OSError) as e:
+                # The keyboard library needs elevated rights on some
+                # systems; mouse buttons can still be bound without it.
+                log.warning(f"Cannot listen for keys: {e}")
+        if pynput_mouse is not None:
+            self._mouse_listener = pynput_mouse.Listener(on_click=self._on_click)
+            self._mouse_listener.start()
 
     def _finish(self, binding):
         if self._done.is_set():
@@ -99,7 +114,7 @@ class BindingCapture:
         self._finish(MOUSE_PREFIX + name)
 
     def stop(self):
-        if self._keyboard_hook is not None:
+        if self._keyboard_hook is not None and keyboard is not None:
             try:
                 keyboard.unhook(self._keyboard_hook)
             except (KeyError, ValueError):
@@ -135,6 +150,8 @@ class KeybindManager:
                 continue
             if is_mouse(binding):
                 self._mouse_bindings[binding] = handler
+            elif keyboard is None:
+                continue
             else:
                 try:
                     self._registered.append(keyboard.add_hotkey(binding, handler))
@@ -149,7 +166,7 @@ class KeybindManager:
                     log.warning(f"Global hotkeys unavailable: {e}")
                     break
 
-        if self._mouse_bindings:
+        if self._mouse_bindings and pynput_mouse is not None:
             self._mouse_listener = pynput_mouse.Listener(on_click=self._on_click)
             self._mouse_listener.start()
 
@@ -164,7 +181,7 @@ class KeybindManager:
         for hotkey in self._registered:
             try:
                 keyboard.remove_hotkey(hotkey)
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, AttributeError):
                 pass
         self._registered = []
         if self._mouse_listener is not None:

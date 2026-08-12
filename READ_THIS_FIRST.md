@@ -14,6 +14,16 @@ The exe checks for a newer release on launch and offers to update itself
 live outside the program, so an update never touches your coordinates.
 Build one yourself with `python build.py` on Windows.
 
+To publish a new version: set the number in `version.py`, then
+
+```
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+GitHub builds the exe and creates the release; everyone running an older
+copy is offered it the next time they open the program. The tag has to
+match `version.py` or the build stops and says so.
+
 Keep the `Font+` folder next to the macro — that's where the price reader
 gets your font from. If you switch resource packs, drop the new pack's
 `Font+` folder in and it picks it up; no recalibration, no code changes.
