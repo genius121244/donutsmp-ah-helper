@@ -37,25 +37,36 @@ def hotbar_regions(settings, item=None):
 
 def order_regions(settings, item=None):
     """The nine order GUI boxes, from the individual slots or the strip."""
-    return _regions(settings, item, "order_slot_{}_region", "order_strip", "order")
+    return _regions(settings, item,
+                   ["order_slot_{}_region", "last_order_slot_{}_region", "last_orders_slot_{}_region"],
+                   ["order_strip", "last_order_strip", "last_orders_strip"],
+                   "order")
 
 
-def _regions(settings, item, slot_key, strip_key, label):
-    individual = [
-        config.get_region(settings, slot_key.format(i), item)
-        for i in range(1, SLOT_COUNT + 1)
-    ]
-    if all(individual):
-        return [tuple(r) for r in individual]
+def _regions(settings, item, slot_keys, strip_keys, label):
+    slot_keys = [slot_keys] if isinstance(slot_keys, str) else list(slot_keys)
+    strip_keys = [strip_keys] if isinstance(strip_keys, str) else list(strip_keys)
 
-    strip = config.get_region(settings, strip_key, item)
-    if strip:
-        return detect.split_strip(tuple(strip), SLOT_COUNT)
+    individual = []
+    for key in slot_keys:
+        values = [config.get_region(settings, key.format(i), item) for i in range(1, SLOT_COUNT + 1)]
+        if all(values):
+            return [tuple(r) for r in values]
+        individual.append(values)
 
-    missing = [i for i, r in enumerate(individual, 1) if not r]
+    for key in strip_keys:
+        strip = config.get_region(settings, key, item)
+        if strip:
+            return detect.split_strip(tuple(strip), SLOT_COUNT)
+
+    best_missing = []
+    for values in individual:
+        best_missing.extend(i for i, r in enumerate(values, 1) if not r)
+    missing = sorted(set(best_missing))
+    strip_hint = strip_keys[0] if strip_keys else ""
     raise SlotReadError(
         f"{label} slots are not configured (missing {missing}). Set the "
-        f"'{strip_key}' box, or all nine individual boxes, in the Pixel/OCR tab."
+        f"'{strip_hint}' box, or all nine individual boxes, in the Pixel/OCR tab."
     )
 
 
@@ -82,7 +93,14 @@ def read_hotbar(settings, item=None):
 
 
 def read_order(settings, item=None):
-    return read_states(settings, order_regions(settings, item), "empty_order_slot")
+    order_template = None
+    for key in ("empty_order_slot", "empty_last_order_slot", "empty_last_orders_slot"):
+        if config.get_template_path(settings, key):
+            order_template = key
+            break
+    if order_template is None:
+        order_template = "empty_order_slot"
+    return read_states(settings, order_regions(settings, item), order_template)
 
 
 # ----------------------------------------------------------------------

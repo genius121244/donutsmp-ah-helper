@@ -36,6 +36,7 @@ class AHFlipTab:
         theme.heading(left, "Items", 15).pack(anchor="w", padx=14, pady=(14, 6))
         self.item_list = ctk.CTkScrollableFrame(left, fg_color="transparent")
         self.item_list.pack(fill="both", expand=True, padx=8)
+        theme.enable_mousewheel_scroll(self.item_list)
 
         buttons = ctk.CTkFrame(left, fg_color="transparent")
         buttons.pack(fill="x", padx=10, pady=10)
@@ -59,6 +60,7 @@ class AHFlipTab:
 
         self.form = ctk.CTkScrollableFrame(right, fg_color="transparent")
         self.form.pack(fill="both", expand=True, padx=8, pady=(0, 10))
+        theme.enable_mousewheel_scroll(self.form)
 
         self._add_entry("name", "Item name",
                         "Just a label for you - it doesn't have to match the "
@@ -80,8 +82,6 @@ class AHFlipTab:
         self._add_entry("sell_price", "Fallback fixed price",
                         "Used when undercutting is off, or when the market "
                         "price can't be read.")
-        self._add_switch("order_full", "Order is 'full' (uses the full-collect "
-                                       "button instead of partial)")
 
         theme.primary_button(self.form, "Set as active item",
                              self.set_active).pack(anchor="w", padx=8, pady=(12, 4))
@@ -157,7 +157,7 @@ class AHFlipTab:
                 item[key] = float(str(value).strip() or 0)
             except ValueError:
                 return
-        elif key in ("enabled", "use_ocr_undercut", "order_full"):
+        elif key in ("enabled", "use_ocr_undercut"):
             item[key] = bool(value)
         else:
             item[key] = value

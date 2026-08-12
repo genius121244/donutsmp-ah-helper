@@ -16,6 +16,8 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
+from unittest import mock
 
 import numpy as np
 from PIL import Image
@@ -139,6 +141,136 @@ class PickupPlanningTests(unittest.TestCase):
         self.assertEqual(slots.occupied_slots([EMPTY, OCC, EMPTY, OCC] + [EMPTY] * 5),
                          [2, 4])
 
+
+class LastOrdersDetectionTests(unittest.TestCase):
+    def test_order_regions_support_last_orders_aliases(self):
+        settings = {"regions": {
+            "last_order_strip": [100, 200, 280, 220],
+        }}
+        boxes = slots.order_regions(settings)
+        self.assertEqual(len(boxes), 9)
+        self.assertEqual(boxes[0], (100, 200, 120, 220))
+        self.assertEqual(boxes[-1], (260, 200, 280, 220))
+
+    def test_macro_starts_on_orders_screen(self):
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9, "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        settings["points"]["order_menu_click1"] = [100, 200]
+        settings["points"]["order_menu_click2"] = [300, 400]
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+
+        engine.open_order_gui()
+
+        engine.actions.send_command.assert_called_once_with("order")
+        self.assertEqual(engine.actions.click_point.call_args_list,
+                         [mock.call("order_menu_click1"),
+                          mock.call("order_menu_click2")])
+
+    def test_shop_stays_open_while_waiting_for_price(self):
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9,
+                              "use_ocr_undercut": True,
+                              "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        settings["points"]["shop_hover_item"] = [10, 20]
+        settings["regions"]["price_tooltip_region"] = [30, 40, 60, 70]
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+        engine.actions.require_region.return_value = (30, 40, 60, 70)
+        engine.actions.require_point.return_value = (10, 20)
+        engine.actions.hover = mock.Mock()
+        engine.actions.close_menu = mock.Mock()
+
+        with mock.patch("engine.ocr.get_lowest_price", side_effect=[50000, 51000]), \
+             mock.patch("engine.pricing.decide", side_effect=[
+                 __import__("pricing").Decision(__import__("pricing").WAIT, None, 50000, "too low"),
+                 __import__("pricing").Decision(__import__("pricing").SELL, 49000, 51000, "ok"),
+             ]):
+            price = engine.determine_listing_price()
+
+        self.assertEqual(price, "49k")
+        self.assertEqual(engine.actions.send_command.call_count, 1)
+        self.assertEqual(engine.actions.close_menu.call_count, 1)
+        self.assertEqual(engine.actions.hover.call_count, 2)
+
+    def test_order_menu_clicks_whichever_box_matches_the_reference(self):
+        """One saved reference, two match boxes: the closer one is clicked.
+
+        The option is picked by coordinates rather than a configured click
+        point, so this asserts the centre of the winning box.
+        """
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9,
+                              "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        settings["regions"]["order_partial_region"] = [60, 10, 100, 30]
+        settings["regions"]["order_full_region"] = [10, 10, 50, 30]
+        settings["templates"]["order_menu_ref"] = "dummy-ref.png"
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+
+        reference = Image.new("RGB", (40, 20), (255, 0, 0))
+        with mock.patch("engine.config.get_template_path", return_value="dummy-ref.png"), \
+             mock.patch("engine.detect.load_template", return_value=reference), \
+             mock.patch("engine.screen.grab", side_effect=[
+                 Image.new("RGB", (40, 20), (250, 0, 0)),   # partial: close
+                 Image.new("RGB", (40, 20), (0, 255, 0)),   # full: nothing like it
+             ]):
+            engine.open_order_gui()
+
+        engine.actions.click.assert_called_once_with(80, 20)  # centre of partial
+
+    def test_order_menu_is_left_alone_without_a_reference(self):
+        """No reference saved means no idea which option is which, so the
+        macro must not click a guess into the menu."""
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9,
+                              "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+
+        with mock.patch("engine.config.get_template_path", return_value=None):
+            engine.open_order_gui()
+
+        engine.actions.click.assert_not_called()
+
+    def test_full_hotbar_keeps_orders_menu_open(self):
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9,
+                              "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+
+        with mock.patch("engine.slots.read_hotbar", return_value=[detect.OCCUPIED] * 9), \
+             mock.patch("engine.slots.read_order", return_value=[detect.OCCUPIED] * 9):
+            result = engine.fill_hotbar()
+
+        self.assertEqual(result, (9, False))
+        self.assertTrue(engine.actions.close_menu.called)
+        self.assertEqual(engine.actions.send_command.call_count, 1)
+
+    def test_sell_batch_selects_each_slot_before_each_sale(self):
+        settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        settings["items"] = [{"name": "Rocket", "batch_size": 9,
+                              "points": {}, "regions": {}, "hover_points": {}}]
+        settings["active_item"] = "Rocket"
+        settings["general"]["price_check_per_sell"] = True
+        engine = __import__("engine").Engine(settings, lambda: True, lambda: False)
+        engine.actions = mock.Mock()
+        engine.read_money = mock.Mock(return_value=None)
+        engine.determine_listing_price = mock.Mock(return_value="49k")
+        engine.sell_one = mock.Mock(return_value=True)
+
+        with mock.patch("engine.slots.read_hotbar", return_value=[detect.OCCUPIED] * 9):
+            engine.sell_batch()
+
+        expected = [mock.call(i) for i in range(1, 10)]
+        self.assertEqual(engine.actions.select_hotbar_slot.call_args_list, expected)
+        self.assertEqual(engine.sell_one.call_count, 9)
 
 class PickupVerificationTests(unittest.TestCase):
     """The rule the engine enforces after every shift-click: occupied slots
@@ -313,6 +445,88 @@ class ConfigTests(unittest.TestCase):
         merged = config._deep_merge(config.DEFAULT_SETTINGS, {"version": 2, "items": []})
         self.assertEqual(merged["detection"]["empty_slot_tolerance"],
                          config.DEFAULT_SETTINGS["detection"]["empty_slot_tolerance"])
+
+
+class ConfigSharingTests(unittest.TestCase):
+    """Exporting a setup for a friend, and importing theirs."""
+
+    def setUp(self):
+        self.settings = json.loads(json.dumps(config.DEFAULT_SETTINGS))
+        config.add_item(self.settings, "Rockets")
+        config.set_active_item(self.settings, "Rockets")
+        config.set_region(self.settings, "hotbar_strip", [10, 20, 190, 40])
+
+    def _with_template(self, folder):
+        """A settings dict pointing at a real reference image on disk."""
+        source = os.path.join(folder, "empty_hotbar_slot.png")
+        Image.new("RGB", (20, 20), (139, 139, 139)).save(source)
+        config.set_template_path(self.settings, "empty_hotbar_slot", source)
+        return source
+
+    def test_a_bundle_carries_the_reference_images_too(self):
+        # The receiving machine has no copy of the sender's PNG, so an
+        # export that only held paths would import as "no references".
+        with tempfile.TemporaryDirectory() as folder:
+            self._with_template(folder)
+            bundle = os.path.join(folder, "config.zip")
+            config.export_bundle(self.settings, bundle)
+
+            with zipfile.ZipFile(bundle) as z:
+                names = z.namelist()
+            self.assertIn("settings.json", names)
+            self.assertTrue(any(n.startswith("templates/") for n in names))
+
+    def test_importing_repoints_templates_at_this_machine(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sender_path = self._with_template(folder)
+            bundle = os.path.join(folder, "config.zip")
+            config.export_bundle(self.settings, bundle)
+
+            receiver_dir = os.path.join(folder, "their-templates")
+            original, config.TEMPLATE_DIR = config.TEMPLATE_DIR, receiver_dir
+            try:
+                imported = config.import_bundle(bundle)
+            finally:
+                config.TEMPLATE_DIR = original
+
+            path = (imported.get("templates") or {}).get("empty_hotbar_slot")
+            self.assertTrue(path.startswith(receiver_dir))
+            self.assertNotEqual(path, sender_path)
+            self.assertTrue(os.path.exists(path))
+            self.assertEqual(config.get_region(imported, "hotbar_strip"),
+                             [10, 20, 190, 40])
+            self.assertEqual(config.active_item(imported)["name"], "Rockets")
+
+    def test_a_zip_that_is_not_a_config_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = os.path.join(folder, "holiday-photos.zip")
+            with zipfile.ZipFile(bundle, "w") as z:
+                z.writestr("beach.jpg", "not json")
+            with self.assertRaises(ValueError):
+                config.import_bundle(bundle)
+
+    def test_a_template_escaping_the_folder_is_ignored(self):
+        # Never write where the zip says; a crafted entry must not land a
+        # file outside the template folder.
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = os.path.join(folder, "evil.zip")
+            with zipfile.ZipFile(bundle, "w") as z:
+                z.writestr("settings.json", json.dumps(
+                    {"version": 2, "templates": {"empty_hotbar_slot": "../../evil.png"}}))
+                z.writestr("../../evil.png", "x")
+
+            receiver_dir = os.path.join(folder, "templates")
+            original, config.TEMPLATE_DIR = config.TEMPLATE_DIR, receiver_dir
+            try:
+                imported = config.import_bundle(bundle)
+            finally:
+                config.TEMPLATE_DIR = original
+
+            path = (imported.get("templates") or {}).get("empty_hotbar_slot")
+            if path:
+                self.assertTrue(os.path.abspath(path).startswith(
+                    os.path.abspath(receiver_dir)))
+            self.assertFalse(os.path.exists(os.path.join(folder, "..", "evil.png")))
 
 
 class WebhookTests(unittest.TestCase):
