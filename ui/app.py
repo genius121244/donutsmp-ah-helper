@@ -35,11 +35,10 @@ class App(ctk.CTk):
         theme.apply()
 
         self.title(f"DonutSMP AH Macro {VERSION}")
-        self.geometry("1080x760")
-        self.minsize(940, 660)
         self.configure(fg_color=theme.BG)
 
         self.settings = config.load_settings()
+        self.apply_ui_scale(resize=True)
         self.running = False
         self.paused = False
         self.macro_thread = None
@@ -65,6 +64,39 @@ class App(ctk.CTk):
             updater.check_async(lambda u: self.after(0, self.offer_update, u))
 
     # -- layout ----------------------------------------------------------
+
+    def apply_ui_scale(self, resize=False):
+        """Shrink the interface to fit the monitor it is actually on.
+
+        Only the widgets are scaled, not the window geometry: geometry is
+        then plain pixels, so the window can be clamped to the screen
+        directly. `resize` is for startup and for the user changing the
+        setting - it would be rude to yank a window they had resized
+        themselves back to the default size on any other refresh.
+        """
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        requested = (self.settings.get("general") or {}).get("ui_scale", 0) or 0
+        scale = theme.fit_scale(screen_w, screen_h, requested)
+
+        ctk.set_widget_scaling(scale)
+        self.ui_scale = scale
+        if not resize:
+            return
+
+        # CTk multiplies whatever geometry/minsize are given by the window
+        # scaling it derived from the monitor's DPI, so on a 150% display
+        # asking for 1080 would produce 1620 real pixels. Dividing it back
+        # out keeps these numbers meaning real pixels, which is the only
+        # unit "does this fit on the screen" can be answered in.
+        try:
+            dpi = ctk.ScalingTracker.get_window_scaling(self) or 1.0
+        except (KeyError, AttributeError):
+            dpi = 1.0
+        min_w, min_h = theme.min_window_size(screen_w, screen_h, scale)
+        self.minsize(int(min_w / dpi), int(min_h / dpi))
+        width, height = theme.window_size(screen_w, screen_h, scale)
+        self.geometry(f"{int(width / dpi)}x{int(height / dpi)}")
 
     def _build_layout(self):
         header = ctk.CTkFrame(self, fg_color="transparent")

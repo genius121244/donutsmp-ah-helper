@@ -17,7 +17,7 @@ Build one yourself with `python build.py` on Windows.
 To publish a new version: set the number in `version.py`, then
 
 ```
-git tag v1.3.0 && git push origin v1.3.0
+git tag v1.4.0 && git push origin v1.4.0
 ```
 
 GitHub builds the exe and creates the release; everyone running an older
@@ -25,6 +25,10 @@ copy is offered it the next time they open the program. The tag has to
 match `version.py` or the build stops and says so.
 
 No Python needed for the exe — it carries its own.
+
+On a small laptop screen the window shrinks itself to fit; **Settings →
+Interface** overrides that with a fixed size if you want it smaller or
+bigger than it picked.
 
 ## The font pack
 

@@ -216,6 +216,9 @@ DEFAULT_SETTINGS = {
         "start_minimized": False,
         "keep_cycling": True,
         "check_updates_on_start": True,
+        # Interface size, 1.0 being the design size. 0 means work it out
+        # from the monitor, which is what a small laptop screen needs.
+        "ui_scale": 0,
     },
 }
 

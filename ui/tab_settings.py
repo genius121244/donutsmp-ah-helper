@@ -22,6 +22,17 @@ from applog import log
 from ui import theme
 from version import VERSION
 
+# 0 is "work it out from the monitor"; the rest are fixed multipliers.
+SCALE_CHOICES = {
+    "Auto (fit my screen)": 0,
+    "70%": 0.7,
+    "80%": 0.8,
+    "90%": 0.9,
+    "100%": 1.0,
+    "110%": 1.1,
+    "125%": 1.25,
+}
+
 TIMING_LABELS = {
     "command": "Typing a command",
     "enter": "After pressing Enter",
@@ -54,6 +65,27 @@ class SettingsTab:
         scroll = ctk.CTkScrollableFrame(self.parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=14, pady=14)
         theme.enable_mousewheel_scroll(scroll)
+
+        # -- interface -------------------------------------------------------
+        interface = theme.card(scroll)
+        interface.pack(fill="x", pady=(0, 12))
+        theme.heading(interface, "Interface", 15).pack(anchor="w", padx=16,
+                                                       pady=(14, 2))
+        theme.caption(interface,
+                      "How big the window and everything in it is drawn. Auto "
+                      "shrinks it to fit\nsmall screens and leaves bigger ones "
+                      "alone; pick a size yourself if you\nwant it smaller "
+                      "than that.").pack(anchor="w", padx=16)
+
+        scale_row = ctk.CTkFrame(interface, fg_color="transparent")
+        scale_row.pack(fill="x", padx=16, pady=(8, 14))
+        self.scale_menu = ctk.CTkOptionMenu(
+            scale_row, values=list(SCALE_CHOICES), width=190,
+            fg_color=theme.PANEL_LIGHT, button_color=theme.PANEL_LIGHT,
+            button_hover_color=theme.BORDER, command=self._save_scale)
+        self.scale_menu.pack(side="left", padx=(0, 8))
+        self.scale_status = theme.caption(scale_row, "")
+        self.scale_status.pack(side="left")
 
         # -- detection -------------------------------------------------------
         detection = theme.card(scroll)
@@ -205,6 +237,14 @@ class SettingsTab:
 
     # -- persistence -----------------------------------------------------
 
+    def _save_scale(self, label):
+        if self._loading:
+            return
+        self.app.settings.setdefault("general", {})["ui_scale"] = SCALE_CHOICES[label]
+        self.app.save_settings()
+        self.app.apply_ui_scale(resize=True)
+        self.scale_status.configure(text=f"Drawn at {self.app.ui_scale:.0%}")
+
     def _save_number(self, path, var, cast):
         if self._loading:
             return
@@ -349,3 +389,9 @@ class SettingsTab:
 
         self.pack_status.configure(
             text="Already installed" if fontpack.is_installed() else "")
+
+        requested = (self.app.settings.get("general") or {}).get("ui_scale", 0) or 0
+        label = next((name for name, value in SCALE_CHOICES.items()
+                      if value == requested), "Auto (fit my screen)")
+        self.scale_menu.set(label)
+        self.scale_status.configure(text=f"Drawn at {self.app.ui_scale:.0%}")
