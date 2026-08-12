@@ -16,6 +16,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 import config
+import fontpack
 import updater
 from applog import log
 from ui import theme
@@ -120,6 +121,25 @@ class SettingsTab:
                      "Check for updates when the app starts")
         ctk.CTkLabel(updates, text="").pack(pady=2)
 
+        # -- resource pack ----------------------------------------------------
+        pack = theme.card(scroll)
+        pack.pack(fill="x", pady=(0, 12))
+        theme.heading(pack, "Minecraft font pack", 15).pack(
+            anchor="w", padx=16, pady=(14, 2))
+        theme.caption(pack,
+                      "The price reader only matches text drawn with this pack, "
+                      "so install it and\nturn it on in Minecraft (Options - "
+                      "Resource Packs) before running the macro.\nInstalls to:\n"
+                      f"{fontpack.resourcepacks_dir()}").pack(anchor="w", padx=16)
+
+        pack_row = ctk.CTkFrame(pack, fg_color="transparent")
+        pack_row.pack(fill="x", padx=16, pady=10)
+        theme.subtle_button(pack_row, "Install into Minecraft",
+                            self.install_font_pack, width=170).pack(side="left",
+                                                                    padx=(0, 8))
+        self.pack_status = theme.caption(pack_row, "")
+        self.pack_status.pack(side="left")
+
         # -- config ----------------------------------------------------------
         files = theme.card(scroll)
         files.pack(fill="x")
@@ -223,6 +243,17 @@ class SettingsTab:
         self.status.configure(text=f"Backed up to {os.path.basename(target)}")
         log.success(f"Settings backed up to {target}")
 
+    def install_font_pack(self):
+        try:
+            target = fontpack.install()
+        except (FileNotFoundError, OSError, shutil.Error) as e:
+            self.pack_status.configure(text=str(e))
+            log.error(f"Font pack install failed: {e}")
+            return
+        self.pack_status.configure(
+            text="Installed - enable 'Font+' in Minecraft's resource packs")
+        log.success(f"Font pack installed to {target}")
+
     def export_config(self):
         """Everything needed to reproduce this setup, in one zip."""
         self.app.save_settings()
@@ -315,3 +346,6 @@ class SettingsTab:
                     var.set("" if value is None else str(value))
         finally:
             self._loading = False
+
+        self.pack_status.configure(
+            text="Already installed" if fontpack.is_installed() else "")

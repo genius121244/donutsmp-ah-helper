@@ -17,15 +17,26 @@ Build one yourself with `python build.py` on Windows.
 To publish a new version: set the number in `version.py`, then
 
 ```
-git tag v1.2.0 && git push origin v1.2.0
+git tag v1.3.0 && git push origin v1.3.0
 ```
 
 GitHub builds the exe and creates the release; everyone running an older
 copy is offered it the next time they open the program. The tag has to
 match `version.py` or the build stops and says so.
 
-Keep the `Font+` folder next to the macro — that's where the price reader
-gets your font from. If you switch resource packs, drop the new pack's
+No Python needed for the exe — it carries its own.
+
+## The font pack
+
+The reader compares screen pixels against this pack's atlas, so the game
+has to be *drawing* with it. **Settings → Minecraft font pack → Install
+into Minecraft** copies it to `%APPDATA%\.minecraft\resourcepacks`; then
+turn `Font+` on in Options → Resource Packs. On a new PC or account that's
+the whole setup. (`Font+.zip` in the release is the same pack if you'd
+rather drop it in by hand.)
+
+Keep the `Font+` folder next to the macro too — that's where the *reader*
+gets the atlas from. If you switch resource packs, drop the new pack's
 `Font+` folder in and it picks it up; no recalibration, no code changes.
 
 ## Setting it up the first time
@@ -147,5 +158,6 @@ Consequences worth knowing:
 - `pricing.py` — undercut and floor arithmetic, no side effects.
 - `config.py` — settings, stored in `%APPDATA%\DonutAHMacro` so updating
   the macro never wipes your coordinates.
+- `fontpack.py` — installs the pack into `.minecraft/resourcepacks`.
 - `webhook.py`, `applog.py`, `stats.py`, `keybinds.py`.
 - `updater.py` / `build.py` / `version.py` — the exe build and self-update.
